@@ -1,0 +1,250 @@
+---
+title: "c-peptide"
+author: "whzemuch"
+date: "June 21, 2019"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r data  import and filter, message=FALSE, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(purrr)
+library(data.table)
+library(dplyr)
+library(export)
+library(cowplot)
+library(RColorBrewer)
+
+```
+
+# Import data from csv file
+```{r import data}
+
+file <- "./data/IPGTT_glucose_Insulin_cpeptide_Transplantation_Exp3.csv"
+data <- fread(file, header = TRUE, sep = ",")
+
+data<- gather(data, key=Time, value = Value, "0min":"120min") # convert wide data to long data
+
+head(data)
+str(data)
+
+data$Time <- sub("min", "", data$Time) 
+data$Time <- factor(data$Time, levels = c("0", "15", "30", "60", "120")) # reorder the levels
+
+#colnames(data)[2] <- "Treatment"   [2] will change if "Group" in another column.
+colnames(data) <- gsub("Group", "Treatment", colnames(data))# rename the second column(Group)
+
+ylimit <-  data %>% group_by(Measurement) %>% 
+  summarise(max=ceiling(max(Value)*1.1))
+
+data$Treatment <- factor(data$Treatment, levels = c("Normal","1000Alone","1000+MSC_P", "1000+MSC_T", "500+MSC_P" ))
+data$Round <- as.factor(data$Round)
+
+brewer.pal.info # show all the color palettes
+display.brewer.pal(12, "Paired") # isplay palette "Paired"
+colors <- brewer.pal(12, "Paired") # use palette " Paired"
+colors <- colors[seq(2, 10, 2)] # select light color 2, 4, 6, 8, 10
+colors <- c("#E31A1C","#1F78B4", "#33A02C", "#FF7F00", "#6A3D9A")
+pie(rep(1, length(colors)), col = colors) # pic chart all the colors
+
+data_sum <- data %>% 
+    select( Treatment, Round, RatID) %>% 
+    group_by(Round,  Treatment)
+
+
+```
+
+# Draw plosts
+```{r charts}
+
+# Create a function for drawing the plots using the subset data.
+
+
+group.plot <- function(data,measurement) {
+
+ylabel_max <-  ylimit$max[which (ylimit$Measurement==measurement)]
+
+# Define the color for the line and dot.
+treatment_lev <- levels(data$Treatment)
+cols <-ifelse(data$Treatment == treatment_lev[1] , colors[1],
+
+         ifelse(data$Treatment == treatment_lev[2], colors[2],
+               
+            ifelse(data$Treatment == treatment_lev[3], colors[3], 
+                   
+              ifelse(data$Treatment == treatment_lev[4], colors[4],
+
+                  ifelse(data$Treatment == treatment_lev[5], colors[5],              "")))))
+
+measurement <-ifelse(measurement == "Blood Glucose" , "Blood Glucose(mg/dl)",
+
+                ifelse(measurement == "Insulin" , "Insulin(ng/ul)",
+
+                  ifelse(measurement == "c-peptide" , "c-peptide(ng/ul)",                   ""))) 
+  
+  
+ p <- ggplot(data) 
+ p2 <- p + geom_point(aes(x=Time, y=Value, group=Round), colour=cols)+
+           geom_line(aes(x=Time, y=Value, group=Round,linetype=Round), colour=cols) +
+    facet_grid( ~ RatID )+
+   
+  ggtitle(paste(measurement,": ", data$Treatment[1], "group")) +
+  #xlab("Time(minutes)") +
+  # ylab(measurement) + 
+  labs(x="", y="") +
+  scale_y_continuous(limits = c(0, ylabel_max))+
+ #scale_colour_manual(name = paste0("Fasting Time:", hrs, " hrs"),values = cols)+
+  # scale_shape_manual(values = c(16)) +
+  
+  
+  theme_bw()+
+  theme(panel.grid.major.y = element_line("grey80"),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        plot.title = element_text(size = 12, face = "bold"),
+        
+        axis.text.x=element_blank(),
+        # axis.text.y=element_blank(),
+        #axis.text.x = element_text(angle = 90, size=4, hjust = 1),
+        # axis.text.y = element_text(size=4),
+        # axis.text=element_text(size=4), 
+        legend.position = "bottom")
+# p2 <-  p2 + annotate("text", x="0.33", y=500, label="T",colour=cols, size=3) +
+        #annotate("segment", x="0.33", y=200, xend="0.33", yend=330,   arrow = arrow(length = unit(0.3, "cm"), type = "closed", angle = 15, ends = "first"),  size=0.4, color=cols)
+ 
+  return(p2)
+         
+}
+
+# Create the nested data
+
+nested_df <- data %>% 
+  mutate(Treatment2 = Treatment) %>% 
+  group_by(Measurement, Treatment2) %>% 
+  nest() %>% 
+  mutate(plots2 = map2(data, Measurement,  group.plot)) %>% 
+  arrange(Treatment2)
+
+nested_df
+
+plots <- plot_grid(nested_df$plots2[[1]],  ## need to be ggplot object
+          nested_df$plots2[[2]],
+          nested_df$plots2[[3]],
+          nested_df$plots2[[4]],
+          nested_df$plots2[[5]],
+          ncol = 3
+          
+          )
+
+# The default size for grap2pdf is 7inchesx7inches, which makes the output looks busy and ugly.
+# 15inchesx10inches is a good size, the font of 18inchesx18inches is too small. 
+
+graph2ppt(plots, file= "IPGTT_Exp3_20190621.pptx", width=18, height=15)
+
+graph2pdf(plots, file= "IPGTT_Exp3_20190621_all_16x9.pdf", width=16, height=9)
+
+
+
+for (i in seq_along(nested_df$plots2)) {
+  
+   plot<- nested_df$plots2[[i]]
+   print(plot)
+  
+  #graph2ppt(nested_df$plots2[[i]], file= paste(nested_df$Measurement[i],  nested_df$Treatment2[i],"20190619.pptx", sep="_"), width=9, height=6)
+  # graph2png(plot, file= paste(nested_df$Measurement[i], nested_df$Treatment2[i],".pptx", sep="_"), width=7, height=5)
+  
+  
+}
+
+
+
+#myplots <- map2(df, measurements, group.plot)
+
+
+
+# nplots <- nested_df$plots2
+# names(nplots) <- as.vector(paste(unlist(nested_df$Measurement), unlist(nested_df$Treatment2), sep="_"))
+
+
+# pdf(file=paste0("plot_grid1.pdf"), width = 15, height = 10)
+
+# 
+# iwalk(nplots, ~{
+#      pdf(paste0(.y, "_plots.pdf") )
+#      print(.x)
+#      dev.off()
+# })
+# 
+
+
+
+
+
+sessionInfo()
+
+
+```
+
+```{r eval=FALSE, include=FALSE}
+# see: https://aosmith.rbind.io/2018/08/20/automating-exploratory-plots/
+# Automating exploratory plots with ggplot2 and purrr
+set.seed(16)
+dat = data.frame(elev = round( runif(20, 100, 500), 1),
+                 resp = round( runif(20, 0, 10), 1),
+                 grad = round( runif(20, 0, 1), 2),
+                 slp = round( runif(20, 0, 35),1),
+                 lat = runif(20, 44.5, 45),
+                 long = runif(20, 122.5, 123.1),
+                 nt = rpois(20, lambda = 25) )
+head(dat)
+
+response = names(dat)[1:3]
+expl = names(dat)[4:7]
+
+response = set_names(response)
+
+expl = set_names(expl)
+expl
+
+scatter_fun = function(x, y) {
+     ggplot(dat, aes_string(x = x, y = y) ) +
+          geom_point() +
+          geom_smooth(method = "loess", se = FALSE, color = "grey74") +
+          theme_bw()
+}
+
+scatter_fun("lat", "elev")
+
+scatter_fun2 = function(x, y) {
+     ggplot(dat, aes(x = !!sym(x), y = !!sym(y) ) ) +
+          geom_point() +
+          geom_smooth(method = "loess", se = FALSE, color = "grey74") +
+          theme_bw()
+}
+
+scatter_fun2("lat", "elev")
+
+elev_plots = map(expl, ~scatter_fun(.x, "elev") )
+
+elev_plots
+
+all_plots = map(response,
+                ~map(expl, scatter_fun, y = .x) )
+
+
+models <- mtcars %>% 
+  split(.$cyl)
+
+JSON <- rep(list(x,y),3)
+x <- list(a=1, b=1)
+y <- list(a=1)
+JSON <- rep(list(x,y),3)
+
+
+
+```
+

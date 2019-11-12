@@ -1,0 +1,180 @@
+---
+title: "HSY Par-C5 cell culture on silk films: 2018Dec"
+author: "Hanzhou Wang"
+date: "2018/12/10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE}
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+
+```
+
+```{r import data}
+#read data from csv file
+file <- "./data/HSY cell culture on silk film _2019May.csv"
+data <- read.csv(file, sep = ",", header = TRUE) 
+# data <- data.table::fread(file, sep = ",", header = TRUE)
+# data <- data[, -c(9,10)]
+
+head(data)
+
+
+```
+
+
+```{r tidy data}
+
+#data wide form -> long form using tidyr
+data_long <- 
+  data %>% gather(key = replicateS, value = fluo, REP1:REP4)
+
+
+#save long form data as csv
+# write.csv(data_long, file = "./results/data_alamar_long_2018Dev.csv")
+
+# save(data_long, file = "./results/data_alamar_long_2018Dev.rdata")
+# load(file = "./results/data_alamar_long_2018Dev.rdata")
+
+#convert numeric to factors for Days
+  # data_long$Days <- as.factor(data_long$Days) # skip this if need geom_smooth.
+
+```
+
+```{r plot, message=TRUE, echo=TRUE}
+#Draw a plot
+
+#reorder the variable for facet-grid
+data_long$Density_f = factor(data_long$Density, 
+            levels = rev(levels(factor(data_long$Density))))
+
+data_long$Surface_2 <- factor(data_long$Surface,levels = c("TCP", "Silk"))
+
+
+
+
+draw.plot <- function(data, cells) {
+
+  # set parameters
+    cells <-  cells
+    data <- data
+    
+    data_long <-
+      data %>%
+      filter(CellType == cells)
+
+#  calculate value for setting scale for y axix
+#  [see here] (https://stackoverflow.com/questions/18046051/setting-individual-axis-limits-with-facet-wrap-and-scales-free-in-ggplot2)
+  min_y <- min(data$fluo)
+  max_y <- max(data$fluo)
+
+
+# plot: geom_jitter + geom_smooth()
+    
+    p <- ggplot(data_long, aes(x=Day, y=fluo, colour = replicateS))
+    p2 <- p +  geom_jitter(width = 0.16, height = 0.9) +
+         geom_smooth(
+                     aes(x = Day, y = fluo),
+                     inherit.aes = FALSE, 
+                     se = FALSE,
+                     method = "auto", 
+                     span = 2.5
+                    ) +
+    facet_grid(Surface_2 ~ Density_f, scales = "free") +  
+      # scales= "free" to use differet scales
+    # scale_y_continuous(limits = c(min_y, max_y)) +
+    ggtitle(cells) +
+    xlab("Culture time (days)") +
+    ylab("Fluorescene intensity") +
+    theme_bw() +
+    theme(
+         #panel.grid.major = element_blank(), 
+         panel.grid.minor = element_blank(),
+         panel.background = element_blank()
+         #panel.border = element_blank(),
+         #axis.line = element_line(colour = "black")
+    )
+    
+return(p2)
+}
+
+pHSY <- draw.plot(data_long, "HSY")
+pParC5 <-  draw.plot(data_long, "ParC5")
+
+pHSY
+pParC5
+
+
+```
+```{r another function}
+
+
+
+draw.plot <- function(data, cells, plot_labs, x_aes) {
+
+  # set parameters
+  # cells <-  cells
+  # data <- data
+    
+    data_long <-
+      data %>%
+      filter(CellType == cells)
+
+#  calculate value for setting scale for y axix
+#  [see here] (https://stackoverflow.com/questions/18046051/setting-individual-axis-limits-with-facet-wrap-and-scales-free-in-ggplot2)
+  min_y <- min(data$fluo)
+  max_y <- max(data$fluo)
+
+
+# plot: geom_jitter + geom_smooth()
+    
+    p <- ggplot(data_long, aes(x=x_aes, y=fluo, colour = replicateS))
+    p2 <- p +  geom_jitter(width = 0.16, height = 0.9) +
+         geom_smooth(
+                     aes(x = x_aes, y = fluo),
+                     inherit.aes = FALSE, 
+                     se = FALSE,
+                     method = "auto", 
+                     span = 2.5
+                    ) +
+    facet_grid(Surface_2 ~ Density_f, scales = "free") +  
+      # scales= "free" to use differet scales
+    scale_y_continuous(limits = c(min_y, max_y)) +
+    labs(plot_labs) + 
+    theme_bw() +
+    theme(
+         #panel.grid.major = element_blank(), 
+         panel.grid.minor = element_blank(),
+         panel.background = element_blank()
+         #panel.border = element_blank(),
+         #axis.line = element_line(colour = "black")
+    )
+    
+return(p2)
+}
+ 
+plot_labs = list(
+    x = "Culture time (days)", 
+    y = "The y axis!", 
+    title = "The title!"
+  )
+
+pHSY <- draw.plot(data_long, "HSY", plot_labs, "Days")
+pParC5 <-  draw.plot(data_long, "ParC5", plot_labs, "Days")
+
+pHSY
+pParC5
+
+```
+
+
+
+
+

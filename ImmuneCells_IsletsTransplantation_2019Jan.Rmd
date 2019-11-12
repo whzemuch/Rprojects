@@ -1,0 +1,375 @@
+---
+title: "ImmuneCells_IsletTransplantaiton"
+author: "whzemuch"
+date: "Jan 20, 2019"
+output:
+  pdf_document: default
+  html_document: default
+params:
+  date: !r Sys.Date()
+  printcode: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+library(tidyverse)
+library(tidyr)
+library(ggplot2)
+library(data.table)
+library(ggpubr)
+library(ggstatsplot)
+library(purrr)
+library(cowplot)
+library(plyr)
+library(ggrepel)
+
+```
+
+## read data from csv file
+```{r import data, echo=TRUE}
+data <- fread("./data/20190120_ FlowJo table_Islets Transplanted Rats.csv", sep = ",", header = TRUE)
+
+data_long <- 
+      data %>% gather(key=populations, value=ratio, P1:CD11bposLy6Gneg_cells)
+
+head(data_long)
+str(data_long)
+data_long$days <-  as.factor(data_long$days)
+data_long$strain <- as.factor(data_long$strain)
+save(data_long, file = "./data/data_long.RData")
+
+```
+
+## draw plots
+
+```{r plots, echo=TRUE}
+
+# plot: geom_jitter + geom_smooth()
+
+data_long <-  data_long %>% filter(populations != "P1")
+
+population_name <- c(
+                     'CD4pos_cells'= "CD4+",
+                     'CD8pos_cells'= "CD8+",
+                     'CD11bposLy6Gneg_cells' = "CD11b+Ly6G-",
+                     'CD11bposLy6Gpos_cells' = "CD11b+Ly6G+"
+                    )
+
+
+
+data_vline <- data.frame( populations= levels(factor(data_long$populations)), Xvalue=rep(5.5, 4), Yvalue=rep(55, 4), Ltext= rep("Fischer Rat", 4))
+
+    p <- ggplot(data_long, aes(x=Treatment, y=ratio, colour = Treatment, shape=strain))
+    
+    p2 <- p + geom_boxplot() +  
+        geom_jitter(width = 0.16, height = 0.8,size=3) +
+        geom_vline(data=data_vline, aes(xintercept = Xvalue),                                 linetype="dashed", show.legend = F) +
+        annotate("text", x=5.6, y=55, label="Fisher Rat", size=2, hjust=0)+
+    
+
+        
+               # geom_smooth(
+         #            aes(x = population, y = ratio),
+         #            inherit.aes = FALSE, 
+         #            se = FALSE,
+         #            method = "auto", 
+         #            span = 2.5
+          #          ) +
+    facet_grid( .~ populations,  
+                labeller = as_labeller(population_name)
+               ) +  # scales= "free" to use differet scales
+    ggtitle("Immune cells") +
+    # xlab("Days") +
+    ylab("Percentage") +
+    scale_shape_manual(values = c(1, 23))+
+    theme_bw()  +
+     theme(
+          # axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+          axis.text.x = element_blank(),
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          # panel.background = element_blank(),
+          # panel.border = element_blank(),
+          axis.line = element_line(colour = "black"),
+          legend.position = "bottom"
+             ) +
+      guides(col=guide_legend(nrow=2))
+   
+p2  
+
+
+```
+
+```{r y shu ggstatsplot, echo=TRUE}
+
+
+plot_fun = function(data) {
+  ggscatterstats(
+  data = data,
+  x = Sepal.Length,
+  y = Sepal.Width,
+  ggtheme = ggthemes::theme_fivethirtyeight(),
+  ggstatsplot.layer = FALSE,
+  messages = FALSE,
+  marginal.type = "boxplot",
+  title =
+    glue::glue("Species: {(data$Species)} (n = {length(data$Sepal.Length)})")
+  )
+}
+
+
+nested_df <- iris %>% 
+  mutate(Species2 = Species) %>% 
+  group_by(Species) %>% 
+  nest() %>% 
+  mutate(plots2 = map(data, plot_fun))   
+
+
+plotsss <-  combine_plots(
+  plotlist = nested_df$plots2,
+  labels = c("(a)", "(b)", "(c)"),
+  nrow = 3,
+  ncol = 1,
+  title.text = "Relationship between sepal length and width for each Iris species",
+  title.size = 14,
+  caption.text = expression(
+    paste(
+      italic("Note"),
+      ": Iris flower dataset was collected by Edgar Anderson.",
+      sep = ""
+    ),
+    caption.size = 12
+  )
+)
+
+plotsss
+  
+ggbetweenstats(data = iris, 
+               x = Species, 
+               y = Sepal.Length)
+
+
+
+```
+
+```{r example1 purrr, echo=TRUE}
+
+# https://indrajeetpatil.github.io/ggstatsplot/articles/web_only/combine_plots.html#combining-multiple-plots-example-2-with-plyr
+# for reproducibility
+set.seed(123)
+
+# creating a list column with `ggstatsplot` plots
+plots <- datasets::iris %>%
+  dplyr::mutate(.data = ., Species2 = Species) %>% # just creates a copy of this variable
+  dplyr::group_by(.data = ., Species) %>%                
+  tidyr::nest(data = .) %>%                        # a nested dataframe with list column called `data`
+  dplyr::mutate(                                   # creating a new list column of ggstatsplot outputs
+    .data = .,
+    plot = data %>%
+      purrr::map(
+        .x = .,
+        .f = ~ ggstatsplot::ggscatterstats(
+          data = .,
+          x = Sepal.Length,
+          y = Sepal.Width,
+          xfill = "#0072B2",
+          yfill = "#009E73",
+          ggtheme = ggthemes::theme_fivethirtyeight(),
+          ggstatsplot.layer = FALSE,
+          messages = FALSE,                        # turns off warnings and notes messages   
+          marginal.type = "boxplot",
+          title =
+            glue::glue("Species: {.$Species2} (n = {length(.$Sepal.Length)})")
+        )
+      )
+  )
+
+# display the new object (notice that the class of the `plot` list column is
+# S3: ggExtraPlot)
+plots
+
+
+# creating a grid with cowplot
+gp <- ggstatsplot::combine_plots(
+  plotlist = plots$plot,                           # list column containing all ggstatsplot objects
+  nrow = 3,
+  ncol = 1,
+  title.text = "Relationship between sepal length and width for each Iris species",
+  title.size = 14,
+  caption.text = expression(
+    paste(
+      italic("Note"),
+      ": Iris flower dataset was collected by Edgar Anderson.",
+      sep = ""
+    ),
+    caption.size = 12
+  )
+)
+
+gp
+
+```
+
+```{r example1.1, echo=TRUE}
+# for reproducibility
+set.seed(123)
+
+plot_fun = function(data) {
+  ggscatterstats(
+  data = data,
+  x = Sepal.Length,
+  y = Sepal.Width,
+  ggtheme = ggthemes::theme_fivethirtyeight(),
+  ggstatsplot.layer = FALSE,
+  messages = FALSE,     
+  marginal.type = "boxplot",
+  marginal = FALSE,
+  title =
+    glue::glue("Species: {(data$Species)} (n = {length(data$Sepal.Length)})")
+  )
+}
+
+# creating a list column with `ggstatsplot` plots
+plots1 <- iris %>%
+     mutate(Species2 = Species) %>% # just creates a copy of this variable
+     group_by(Species) %>%                
+     nest(data = .) %>%         # a nested dataframe with list column called `data`
+     mutate( plot = map(data, plot_fun) )
+        
+
+# display the new object (notice that the class of the `plot` list column is
+# S3: ggExtraPlot)
+plots
+
+
+# creating a grid with cowplot
+plot.irsi <- ggstatsplot::combine_plots(
+  plotlist = plots$plot,         # list column containing all ggstatsplot objects
+  nrow = 3,
+  ncol = 1,
+  title.text = "Relationship between sepal length and width for each Iris species",
+  title.size = 14,
+  caption.text = expression(
+    paste(
+      italic("Note"),
+      ": Iris flower dataset was collected by Edgar Anderson.",
+      sep = ""
+    ),
+    caption.size = 12
+  )
+)
+
+plot.irsi
+
+```
+
+```{r example 2 plyr, echo=TRUE}
+library(plyr)
+library(gapminder)
+
+#https://indrajeetpatil.github.io/ggstatsplot/articles/web_only/combine_plots.html#combining-multiple-plots-example-2-with-plyr
+# for reproducibility
+set.seed(123)
+
+# let's have a look at the structure of the data
+dplyr::glimpse(x = gapminder::gapminder)
+#> Observations: 1,704
+#> Variables: 6
+#> $ country   <fct> Afghanistan, Afghanistan, Afghanistan, Afghanistan, ...
+#> $ continent <fct> Asia, Asia, Asia, Asia, Asia, Asia, Asia, Asia, Asia...
+#> $ year      <int> 1952, 1957, 1962, 1967, 1972, 1977, 1982, 1987, 1992...
+#> $ lifeExp   <dbl> 28.801, 30.332, 31.997, 34.020, 36.088, 38.438, 39.8...
+#> $ pop       <int> 8425333, 9240934, 10267083, 11537966, 13079460, 1488...
+#> $ gdpPercap <dbl> 779.4453, 820.8530, 853.1007, 836.1971, 739.9811, 78...
+
+# creating a list of plots
+plots <- plyr::dlply(
+  .data = dplyr::filter(gapminder::gapminder, 
+                        year == 2007, continent != "Oceania"),
+  .variables = .(continent),
+  .fun = function(data)
+    ggstatsplot::ggscatterstats(
+      data = data,
+      x = gdpPercap,
+      y = lifeExp,
+      xfill = "#0072B2",
+      yfill = "#009E73",
+      label.var = "country",
+      label.expression = "lifeExp < 45",
+      title = glue::glue("Continent: {data$continent}"),
+      marginal = FALSE
+    ) +
+    ggplot2::scale_x_continuous(labels = scales::comma)
+)
+
+# combining individual plots
+plot.GDP <-  ggstatsplot::combine_plots(
+  plotlist = plots,
+  title.text = "Relationship between GDP (per capita) and life expectancy",
+  nrow = 2,
+  ncol = 2
+)
+
+plot.GDP
+ 
+```
+
+```{r example 2.1 plyr, eval=FALSE, include=FALSE}
+# library(plyr)
+# library(gapminder)
+
+#https://indrajeetpatil.github.io/ggstatsplot/articles/web_only/combine_plots.html#combining-multiple-plots-example-2-with-plyr
+# for reproducibility
+set.seed(123)
+
+# let's have a look at the structure of the data
+dplyr::glimpse(x = gapminder::gapminder)
+
+
+# creating a list of plots
+
+plot_fun = function(data) {
+  ggscatterstats(
+  data = data,
+  x = gdpPercap,
+  y = lifeExp,
+  xfill = "#0072B2",
+  yfill = "#009E73",
+  label.var = "country",
+  label.expression = "lifeExp < 45",
+  marginal = FALSE,
+  title =
+    glue::glue("Continent: {data$continent}")
+  )
+}
+
+
+
+
+plots1 <- plyr::dlply(
+  .data = dplyr::filter(gapminder, year == 2007, continent != "Oceania"),
+  .variables = .(continent),
+  .fun = plot_fun ) +
+    ggplot2::scale_x_continuous(labels = scales::comma)
+
+
+# combining individual plots
+plot.gap <-  ggstatsplot::combine_plots(
+  plotlist = plots1,
+  title.text = "Relationship between GDP (per capita) and life expectancy",
+  nrow = 2,
+  ncol = 2
+)
+
+plot.gap
+ 
+```
+

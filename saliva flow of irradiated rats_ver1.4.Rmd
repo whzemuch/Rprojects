@@ -1,0 +1,388 @@
+---
+title: "Salia Flow_Irradiated Rats"
+author: "whzemuch"
+date: "June 18, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import data
+
+```{r library, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(data.table)
+library(tidyverse)
+library(ggstatsplot)
+library(purrr)
+library(ggpubr)
+library(cowplot)
+library(export)
+
+
+```
+
+```{r importing}
+data <- fread("./data/Irradiated_rats_saliva_flow.csv", header = TRUE, sep = ",")
+dim(data)
+head(data)
+
+
+# draw plot with saliva flow rate without normalization with body weight
+data_flow <-  data %>% 
+    gather(key = Key, value = Value, body_weight:food_consumption) %>% 
+    filter(!is.na(Value)) %>% 
+    filter(days !=1) %>% 
+    select(-date) %>% 
+    filter (Key == "flow_rate") 
+
+data_flow$irradiation = factor(data_flow$irradiation, 
+                               levels=c("Control", "15Gy", "30Gy", "45Gy", "15Gy_3"))
+   
+colnames(data_flow) <- gsub("Value", "saliva_flow_rate", colnames(data_flow))
+
+sum_4_hline <- data_flow %>% 
+    group_by(irradiation) %>% 
+    summarise(flowrate_ref=54)
+
+
+
+head(data_flow)
+
+
+p <- ggplot(data_flow, aes(x=factor(days), y=saliva_flow_rate, color=irradiation, group=irradiation)) +
+       geom_jitter(width = 0, height = 0) +
+       geom_line() + 
+       geom_hline(data=sum_4_hline, aes(yintercept=flowrate_ref), linetype="dashed") +
+  
+       facet_wrap(~irradiation, nrow = 1) + 
+       ggtitle("Saliva flow rate of irradiated rats") +
+       xlab("Days") +
+       ylab("Saliva_flow_rate(μl/10min)") +
+  
+       theme_bw() +
+       theme(
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          # panel.background = element_blank(),
+          # panel.border = element_blank(),
+          axis.line = element_line(colour = "black"),
+          legend.position = "bottom",
+          axis.text.x=element_text(angle=90, hjust=1)
+        )
+
+p
+
+graph2ppt(p, file="saliva flow rat of irrradiated rats_wo_day2.ppt", width=7, height=6)
+
+
+
+# draw plots with normalized flow rate
+
+data_norm <- data %>% 
+             select(days:flow_rate) %>% 
+             filter(days !=1) %>% 
+             mutate(flow_rate_norm=100*flow_rate/body_weight) 
+            
+
+
+sum_4_hline_norm <- data_flow %>% 
+    group_by(irradiation) %>% 
+    summarise(flowrate_ref_norm=9.22)
+
+data_norm$irradiation = factor(data_flow$irradiation, 
+                               levels=c("Control", "15Gy", "30Gy", "45Gy", "15Gy_3"))
+
+p.norm <- ggplot(data_norm, aes(x=factor(days), y=flow_rate_norm, 
+                                color=irradiation, group=irradiation)) +
+       geom_jitter(width = 0, height = 0) +
+       geom_line() +
+       geom_hline(data=sum_4_hline_norm, aes(yintercept=flowrate_ref_norm),linetype="dashed")+
+       facet_wrap(~irradiation, nrow = 1) + 
+       ggtitle("Saliva flow rate(normalized by body weight) of irradiated rats") +
+       xlab("Days") +
+       ylab("Saliva_flow_rate(μl/10min.100g)") +
+       theme_bw() +
+       theme(
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          # panel.background = element_blank(),
+          # panel.border = element_blank(),
+          axis.line = element_line(colour = "black"),
+          legend.position = "bottom",
+          axis.text.x=element_text(angle=90, hjust=1)
+        )
+       
+p.norm
+
+graph2ppt(p.norm, file="normalized saliva flow rat of irradiated rats_wo_day2", width=7, height=6)
+
+
+
+
+
+# draw body weight plot
+p.bw <- ggplot(data_norm, aes(x=factor(days), y=body_weight, color=irradiation, group=irradiation)) +
+        geom_jitter(width = 0, height = 0) +
+        geom_line() +
+  
+        facet_wrap(~irradiation, nrow = 1) + 
+        ggtitle("Rat body Weight")+
+        xlab("Days") +
+        ylab("Body Weight(g)") +
+        # ylim(0,600)+
+  
+       theme_bw()+
+       theme(
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          # panel.background = element_blank(),
+          # panel.border = element_blank(),
+          axis.line = element_line(colour = "black"),
+          legend.position = "bottom",
+          axis.text.x=element_text(angle=90, hjust=1)
+        )
+p.bw
+
+graph2ppt(p.bw, file="bodyweight_irradiatedRats2.pptx", width=7, height=6)
+
+plots <- plot_grid(p, p.norm, p.bw, 
+                   labels ="AUTO",
+                   align = "v",
+                   ncol = 1)
+
+graph2ppt(plots, file="irradiatedRats_combPlots.pptx", width=10, height=16)
+
+
+
+# plot_comb <- cowplot::plot_grid(p, p.norm, 
+#                       labels = "AUTO", 
+#                       align = 'v',
+#                       ncol = 1,
+#                       label_colour = "black")
+# 
+# plot_comb
+
+
+```
+
+```{r ggstatsplot, eval=FALSE, include=FALSE}
+
+draw_plot <- function(data) {
+  ggbetweenstats(
+    data = data,
+    x = days,
+    y = Value,
+    plot.type  = "violin",
+    message = FALSE,
+    
+    pairwise.comparisons = TRUE,
+    pairwise.annotation = "p.value",
+    pairwise.display = "significant",
+    
+    mean.plotting = FALSE,
+    ggstatsplot.layer = FALSE,
+    sample.size.label = FALSE 
+    # title = glue::glue("{(data$Key)} (n = 5)")
+    
+    
+  )
+}
+
+data_nested <-  data %>% 
+    gather(key = Key, value = Value, body_weight:food_consumption) %>% 
+    filter(!is.na(Value)) %>%  
+    mutate(Key2 = Key) %>% 
+    select(-date) %>% 
+    group_by(Key) %>% 
+    nest() %>% 
+    mutate(plots=map(data, draw_plot))
+
+
+com_plots <- combine_plots(
+  plotlist = data_nested$plots,
+  nrow=2, 
+  ncol=2, 
+  title.text = "Irradiated rats"
+  
+)
+
+
+com_plots
+
+
+```
+
+```{r eval=FALSE, include=FALSE}
+data_flow <-  data %>% 
+    gather(key = Key, value = Value, body_weight:food_consumption) %>% 
+    filter(!is.na(Value)) %>%  
+    select(-date) %>% 
+    filter (Key == "flow_rate")
+
+data_flow$irradiation = factor(data_flow$irradiation, 
+                               levels=c("Control", "15Gy", "30Gy", "45Gy", "15Gy_3"))
+data_flow$days <- as.character(data_flow$days)
+data_flow$days <-  factor(data_flow$days, levels =c("0", "1", "7", "14", "21", "28", "174", "180"))
+
+
+plot_saliva <- ggstatsplot::grouped_ggbetweenstats(
+  data = data_flow,
+  x = "days",
+  y = "Value",
+  grouping.var = "irradiation",
+  # test.value = 15.5,
+  title.prefix = "Dose:",
+  # ggplot.component = ggplot2::scale_y_continuous(
+  #  sec.axis = ggplot2::dup_axis(name = "percentile score"),
+  # breaks = seq(0, 12, 2)
+  #),
+  messages = FALSE,
+  nrow=4, 
+  ncol=1
+)
+
+
+
+```
+
+```{r draw plots, eval=FALSE, include=FALSE}
+
+data_flow <-  data %>% 
+    gather(key = Key, value = Value, body_weight:food_consumption) %>% 
+    filter(!is.na(Value)) %>%  
+    select(-date) %>% 
+    filter (Key == "flow_rate")
+
+data_flow$irradiation = factor(data_flow$irradiation, 
+                               levels=c("Control", "15Gy", "30Gy", "45Gy", "15Gy¡Á3"))
+
+    
+plot_flow  <- ggbetweenstats(
+    data = data_flow,
+    x = days,
+    y = Value,
+    plot.type  = "violin",
+    message = FALSE,
+    
+    pairwise.comparisons = TRUE,
+    pairwise.annotation = "p.value",
+    pairwise.display = "significant",
+    
+    mean.plotting = FALSE,
+    ggstatsplot.layer = FALSE,
+    sample.size.label = FALSE,  
+    # title = glue::glue("{(data$Key)} (n = 5)")
+    ylab = "saliva flow rate (μl/min)"
+    
+  )
+
+plot_flow
+
+plot_flow_pr <- ggboxplot(
+   data = data_flow,
+   x = "days", 
+   y = "Value",
+   ylab = "saliva flow rate (μl/min)",
+   color = "irradiation",
+   add = "jitter",
+   facet.by = "irradiation"
+  
+)
+
+plot_flow_pr
+
+sessionInfo()
+
+
+
+
+```
+
+```{r eval=FALSE, include=FALSE}
+
+# for reproducibility
+set.seed(123)
+
+# removing factor level with very few no. of observations
+df <- dplyr::filter(.data = ggplot2::mpg, cyl %in% c("4", "6", "8"))
+
+# plot
+plot_group <- ggstatsplot::grouped_ggdotplotstats(
+  data = df,
+  x = "cty",
+  y = "manufacturer",
+  grouping.var = "cyl",
+  test.value = 15.5,
+  title.prefix = "cylinder count",
+  ggplot.component = ggplot2::scale_y_continuous(
+    sec.axis = ggplot2::dup_axis(name = "percentile score"),
+    breaks = seq(0, 12, 2)
+  ),
+  messages = FALSE,
+  nrow=1, 
+  ncol=3
+)
+
+
+```
+
+-
+```{r eval=FALSE, include=FALSE}
+library(grid)
+library(plyr)
+
+set.seed(123)
+myd <- data.frame(class=rep(1:4, each=100), yvar=rnorm(400, 50, 30))
+
+
+arrow_pos <-  read.table(header = TRUE, stringsAsFactors = FALSE,
+                         text = "class  name      year
+                                 2      subject4  104.0
+                                 3      subject3  8.5
+                                 3      subject3  80.0
+                                 4      subject2  40
+                                 4      submect1  115.0")
+
+# calculate the y position for the lablels and arrows
+# For the myd data frame, obtain counts within each bin, but separately for each class 
+bwidth <- 10 # Set binwidth
+
+Min <- floor(min(myd$yvar)/bwidth)*bwidth
+Max <- ceiling(max(myd$yvar)/bwidth)*bwidth
+
+# Function to dot the counting
+
+func <-  function(df) {
+  tab = as.data.frame(table(cut(df$yvar, breaks = seq(Min, Max, bwidth), right=FALSE)))
+  tab$upper = Min + bwidth*(as.numeric(rownames(tab)))
+  return(tab)
+}
+
+# Apply the function ot each class in myd data frame
+
+
+TableOfCounts <-  ddply(myd, .(class), function(df) func(df))
+
+tab1 = as.data.frame(table(cut(myd$yvar, breaks = seq(Min, Max, bwidth), right=FALSE)))
+  tab1$upper = Min + bwidth*(as.numeric(rownames(tab)))
+  return(tab)
+
+
+ NAME <- c("A", "A", "B", "B", "C", "C")
+ YEAR <- c(2016, 2011, 2016, 2011, 2016, 2011)
+ YEAR <- as.factor(YEAR)
+ VALUE <- c(1, 4, 1, 5, 2, 8)
+ DATA <- data.frame(NAME, YEAR, VALUE)
+
+ddata <- reshape(DATA, v.names="VALUE", idvar = "NAME", timevar = "YEAR", direction = "wide")
+
+
+
+
+
+
+```
+
+
