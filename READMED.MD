@@ -8,9 +8,3 @@ GitHub & BitBucket HTML Preview allows you to render those files without cloning
     - ttps://htmlpreview.github.io/?https://github.com/twbs/bootstrap/gh-pages/2.3.2/index.html
 
 
-## git Routine
-
-- git status
-- git add -A
-- git commit -m "your comments on the changes"
-- git push
