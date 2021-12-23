@@ -1,0 +1,603 @@
+---
+title: "Marmoset Proteomics"
+output: 
+  html_document:
+    keep_md: true
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(scipen=999)
+```
+### Load Packges
+```{r chunk1, warning=FALSE, message=FALSE, error=FALSE}
+
+library(clusterProfiler)
+library(lattice)
+library(janitor)
+library(skimr)
+library(scales)
+library(glue)
+library(broom)
+
+library(ggprism)
+library(ggsci)
+library(ggpubr)
+library(export)
+
+library(data.table)
+library(tidyverse)
+library(plotly)
+
+
+theme_half_border <- theme_pubr() + 
+     theme(
+      strip.background = element_blank(),
+      strip.text = element_text(face="bold", size = 9),
+      #panel.border = element_rect(fill = NA, colour = "black"),
+      axis.title.y = element_text(face="bold", size = 11),
+      axis.ticks.x = element_blank(), 
+      axis.line = element_line(colour = "black"),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_blank(),
+      panel.background = element_blank(),
+      legend.position = "none")
+
+```
+
+### Read in data
+```{r chunk2, warning=FALSE, message=FALSE, error=FALSE }
+# Read in data exported from ScaffoldDIA
+file <- "./data/log2 excl int Samples Table of M2021-074 Males search elib from 20210305.csv"
+data <- fread(file, data.table=F)
+head(data %>% as_tibble())
+
+# Read in the uniprot id list that from ID mapping(https://www.uniprot.org/uploadlists/)
+uniprot <- "./data/uniprot-yourlist_M20210312A94466D2655679D1FD8953E075198DA813C2215.tab"
+uniprot_ann <- fread(uniprot, data.table = FALSE) %>%
+   dplyr::select(-1,  uniprot_id = Entry) %>% 
+   clean_names()
+head(uniprot_ann %>% as.tibble())
+
+# check how many protein does not have a gene name      
+subset(uniprot_ann, gene_names=="") %>% dim() %>% .[1] #372
+
+```
+
+### Filter proteins (p < 0.05, fold change > 2 or < 0.5   )
+```{r chunk3, warning=FALSE, message=FALSE, error=FALSE }
+
+df_clean <- data %>% 
+  clean_names() %>% 
+  select(protein_name, pvalue = t_test_cl_group, old_males_rapa, fold_change = column1)  %>%
+  mutate(protein_name = str_extract(protein_name, "[A-Z0-9]{2,}")) %>% 
+  filter((str_detect(old_males_rapa, "^[0-9-]"))) %>% 
+  mutate(old_males_rapa = as.numeric(old_males_rapa)) %>% 
+  filter((str_detect(pvalue, "^[0,1]"))) %>%  
+  filter(pvalue < 0.05) %>% 
+  filter(old_males_rapa > 1 | old_males_rapa < -1)  %>% 
+  arrange(desc(fold_change)) %>% 
+  select(protein_name, fold_change)
+
+filt_protein <- df_clean$protein_name
+  
+write_csv(df_clean, file = "df_clean.csv")
+
+```
+
+
+```{r chunk4,  eval=FALSE, include=FALSE}
+# AnnotationHub
+
+data(geneList, package = "DOSE")
+
+d <- bitr(names(gene_list), 
+      fromType = "UNIPROT",
+      toType = "ENTREZID", 
+      OrgDb = "org.Hs.eg.db"
+      )
+
+
+library(AnnotationHub)
+
+hub <- AnnotationHub()
+hub
+
+unique(hub$dataprovider)
+unique(hub$species) %>% grep("jacchus", ., value = TRUE)
+unique(hub$rdataclass)
+
+ dm <- query(hub, c("OrgDb", "jacchus"))
+
+marmoset_orgb <- dm[["AH80634"]]
+
+columns(marmoset_orgb)
+length(keys(marmoset_orgb))
+keytypes(marmoset_orgb)
+
+gene_list <- data_wide %>% pull(gene_names)  #4978
+
+
+entrizid_list <- bitr(gene_list, 'SYMBOL', "ENTREZID", marmoset_orgb) 
+  
+colnames(entrizid_list)[1] <- "gene_names"
+
+
+
+df_id <- data_wide %>% 
+  dplyr::select(uniprot_id, gene_names) %>% 
+  inner_join(entrizid_list, by = "gene_names" ) 
+
+sample_gene <- df_id$ENTREZID[1:100]
+
+
+enrich.go = enrichGO(
+     gene = sample_gene,
+     OrgDb = marmoset_orgb,
+     
+     
+    
+    pvalueCutoff = 1,
+    qvalueCutoff = 1,
+    readable     = T)
+     
+)
+
+barplot(enrich.go, showCategory = 20)
+
+ enrich.go@result %>%  View
+   fiter()
+   mutate(GeneRatio = eval(parse(text = GeneRatio)))%>% 
+   ggplot(aes(x = GeneRatio, y = fct_reorder(Description, GeneRatio))) + 
+        geom_point(aes(color = p.adjust)) +
+        theme_bw(base_size = 14) +
+        scale_colour_gradient(limits=c(0, 0.10), low="red") +
+        ylab(NULL) 
+
+
+write_csv(gene_list, file = "gene_list.csv")
+len
+
+```
+
+
+### Data clean
+```{r chunk5}
+
+df_clean <- fread("./df_clean.csv", data.table = FALSE) %>% as_tibble()
+filt_protein <- df_clean$protein_name
+
+all_csv <- "./data/excl int Samples Table of M2021-074 ALL search elib from 20210305.csv"
+
+data_all <- fread(all_csv, data.table = FALSE)
+
+head(data_all %>% as_tibble())
+
+data_all <-
+  data_all %>%
+  clean_names() %>% 
+  select(star, protein_name,  starts_with(c("young","old"))) %>%  
+  mutate(uniprot_id = str_extract(protein_name, "[A-Z0-9]{3,}")) %>% 
+  relocate(uniprot_id, .after = "protein_name") 
+
+
+data_all_wide <-   data_all %>% 
+  # replace "missing value as 0
+  mutate(
+     across(
+        starts_with(c("young", "old")), 
+        ~str_replace_all(., "Missing Value", "0" )
+     )
+   ) %>% 
+ left_join(uniprot_ann, by = "uniprot_id")  %>% 
+  mutate(
+    across(
+      starts_with(c("young", "old")),
+      as.numeric
+    )
+  ) 
+
+
+data_long <- data_all_wide %>% 
+  pivot_longer(
+    cols = starts_with(c("young", "old")),
+    names_to = c("age", "sex", "drug", "animal_id"),
+    names_sep = "_",
+    values_to = "exclusive_intensity"
+  ) %>% 
+  unite("treatment", age:drug, sep= "_") 
+
+slice_sample(data_long, n=8) %>% as_tibble()
+
+
+
+
+data_long2 <- data_long %>% 
+  mutate(log2_intensity = log2(exclusive_intensity))
+
+# Check the distribution of exclusive intensity
+
+histogram(~ exclusive_intensity | animal_id , data = data_long,
+          xlab = "Animal ID",
+          main = "Exclusive Intensity")
+
+histogram(~ log2_intensity | animal_id , data = data_long2,
+          xlab = "Animla ID",
+          main = "Log2 of Exclusive Intensity")
+
+bwplot(log2_intensity ~ animal_id , data = data_long2,
+       xlab = "Animal ID",
+       main = "Log2 of Exclusive Intensity")
+
+```
+
+
+
+### Plotting...plotly
+```{r chunk6_plotly}
+
+# functions---------------------
+
+plotly_box <- function(data_long){
+  # draw a ggplot and convert it a ggplotly object
+  # 
+  p <-  data_long %>% 
+    ggplot(aes(treatment, 
+               exclusive_intensity, 
+               color = treatment,
+               text = paste('<b>Protien Name:</b>', protein_names,
+                            '<br><b>Gene Name: </b>', gene_names
+                            
+                          )       
+               )
+    ) +
+    geom_boxplot(aes(fill = treatment), alpha = 0.1, show.legend = FALSE) +
+    geom_jitter(width =  0.1, alpha = 0.3) +
+    facet_wrap(~uniprot_id, scales = "free_y", ncol = 4) +
+    labs(
+      x = "",
+      y = "Normalized Exlusive Intensity\n\n",
+      title = ""
+    ) + 
+    scale_y_continuous(labels = scientific) +
+    theme_half_border +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = .5, vjust = .5)
+    )
+  
+  
+  p1 <- ggplotly(p, tooltip = "text")
+  return(p1)
+} 
+split_vector <- function(vector, chunk_length) {
+  # split a vector into a sub-vector list with specific length
+  # vector: a vector
+  # chunk_length: the size of the sub-vector
+    subgroup_list <- split(vector,
+                           ceiling(seq_along(vector) / chunk_length)
+                          )
+    
+  return(subgroup_list)
+}
+
+# split all proteins into 19 vectors(each vector contains 12 proteins)------------
+subgroup_list <- split_vector(filt_protein, 12)
+
+# plotting 19 plots----------------
+plot_list_all <- lapply(subgroup_list, function(x) {
+  data_long %>% 
+    filter(uniprot_id %in% x) %>% 
+    plotly_box()
+})
+
+
+# data_long %>% 
+#     filter(uniprot_id %in% subgroup_list[[1]]) %>% 
+#     plotly_box() 
+
+
+
+# save 19 plottings into 19 html file---------------
+walk2(plot_list_all, names(plot_list_all), function(x,y){
+  html_name = paste0("All_Index_", y, ".html")
+  print(html_name)
+  htmlwidgets::saveWidget(x, html_name)
+  }
+  
+) 
+     
+
+Robjects_description <- tribble(
+  ~description, ~name,
+  "./data/log2 excl int Samples Table of M2021-074 ALL3 search elib from 20210305.csv", "data",
+  "./data/uniprot-yourlist_M20210312A94466D2655679D1FD8953E075198DA813C2215.tab", "uniprot_ann",
+  "./data/excl int Samples Table of M2021-074 ALL search elib from 20210305.csv", "data_male",
+  "wide_format data",                                                             "data_wide",
+  "long format data",                                                        "data_long",
+  "dd: uniprot_id, gene_names, ENTRIZID",                                    "df_id",               
+  "list with about 200 plots",                                               "plot_list_all"
+)
+
+Robjects_description
+
+
+
+```
+### Plots for ASAH1, PCK1...
+```{r chunk7, warning=FALSE, message=FALSE, error=FALSE }
+
+id_4_plotting <- c("F7H4U3","A0A2R8M3L6", "F7ISX5", "F7I3Y0","A0A5F4WAL2", "A0A2R8MHZ1")
+
+data_plot <- data_long %>% 
+  filter(uniprot_id %in% id_4_plotting ) 
+
+p_4presentation <- data_plot %>%    
+    ggplot(aes(treatment,  exclusive_intensity,  fill = treatment)) +
+    geom_boxplot(aes(fill = treatment), alpha = 0.5) +
+    geom_jitter(aes(color="black", fill = treatment),width =  0.1, alpha = 0.9, show.legend = FALSE) +
+    facet_wrap(~factor(gene_names, levels = c("ASAH1", "PCK1", "PLPP1", "AHSG", "CHPT1", "PKN2")),
+                       scales = "free_y", ncol = 6) +
+    labs(
+      x = "",
+      y = "Normalized Exlusive Intensity",
+      title = ""
+    ) + 
+    scale_y_continuous(labels = scientific) +
+    scale_color_aaas() + 
+    scale_fill_aaas() + 
+    
+    theme(
+      strip.background = element_blank(),
+      strip.text = element_text(face="bold", size = 9),
+      #panel.border = element_rect(fill = NA, colour = "black"),
+      axis.title.y = element_text(face="bold", size = 11),
+      axis.ticks.x = element_blank(), 
+      axis.line = element_line(colour = "black"),
+      #axis.text.x = element_text(angle = 45, hjust = .5, vjust = .5),
+      axis.text.x = element_blank(),
+      axis.text.y = element_text(face ="bold", size = 10),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_blank(),
+      panel.background = element_blank(),
+      legend.position = "bottom",
+      # Change legend background color
+      #legend.background = element_rect(fill = "darkgray"),
+      #legend.key = element_rect(fill = "lightblue", color = NA),
+      # Change legend key size and key width
+      legend.key.size = unit(1, "cm"),
+      legend.key.width = unit(0.5,"cm")
+      
+    )
+p_4presentation
+
+graph2ppt(p_4presentation, file = "marmoset_proteomics_boxplots_presentation.pptx")
+
+data_plot %>% 
+  select(gene_names, uniprot_id, treatment, animal_id, exclusive_intensity) %>% 
+  unite(sample_id, treatment:animal_id, sep = "_") %>% 
+  pivot_wider(
+    gene_names:uniprot_id,
+    names_from = sample_id,
+    values_from = exclusive_intensity
+  ) %>% 
+  write_csv( file = "data_final_plot_wide.csv")
+
+
+library(rstatix)
+
+data_anova <- data_plot %>% 
+  select(gene_names, uniprot_id, treatment, animal_id, exclusive_intensity)
+  
+
+aov_res <- data_anova %>% 
+  group_by(gene_names) %>% 
+  anova_test(exclusive_intensity ~ treatment)
+
+aov_tabl <- get_anova_table(aov_res, correction = "auto")
+
+data_anova %>% 
+  group_by(gene_names) %>% 
+  tukey_hsd(exclusive_intensity ~ treatment)
+
+data_plot_split <- data_plot %>% 
+  select(gene_names, uniprot_id, treatment, animal_id, exclusive_intensity) %>% 
+  unite(sample_id, treatment:animal_id, sep = "_") %>% 
+  pivot_wider(
+    gene_names:uniprot_id,
+    names_from = sample_id,
+    values_from = exclusive_intensity
+  ) %>% 
+  group_split(gene_names)
+
+walk2(data_plot_split, seq_along(data_plot_split), ~write_csv(.x, file = paste0("csv", .y, ".csv")))
+
+  
+
+```
+
+
+```{r chunk8, warning=FALSE, message=FALSE, error=FALSE }
+
+dnest <- data_long %>% group_by(uniprot_id, treatment) %>% nest()
+
+dnest$data[[1]]
+
+
+```
+
+
+
+
+### PCA analysis
+```{r chunk9-PCA, warning=FALSE, message=FALSE, error=FALSE }
+
+data_pca <- data_all_wide %>% 
+  select(uniprot_id, starts_with(c("young", "old"))) %>% 
+  pivot_longer(
+    -uniprot_id,
+    names_to = "sample_marmoset",
+    values_to = "exclusive_intensity"
+  ) %>% 
+  pivot_wider(
+    id_cols = sample_marmoset,
+    names_from = uniprot_id,
+    values_from = exclusive_intensity
+  ) 
+
+data_pca[1:5, 1:5]
+
+
+# deal with the error message-----------------------------
+# 
+# when run mutate(pca = map(data, ~promp))
+# 
+# Error: Problem with `mutate()` input `pca`.
+# x 'x' must be numeric
+#ℹ Input `pca` is `map(...)`.
+# Run `rlang::last_error()` to see the erroe occurred
+# 
+# Rerun the procomp directly prcomp(data_pca, scales = T) get the following
+# 
+# #Error in prcomp.default(oopsmat, scale. = T) :
+#cannot rescale a constant/zero column to unit variance
+#
+# see solution: https://blog.csdn.net/qq_39306047/article/details/112129546
+# 1. check constant columns
+# 2. check NAs
+# 3. Is numeric data
+# 4. which(apply(data, 2, var)==0)
+
+
+col_exclude <- which(apply(data_pca[, -1], 2, var) == 0)
+col_exclude <- names(col_exclude)
+
+col_all <- colnames(data_pca)
+col_keep2 <- col_all[!(col_all %in% col_exclude)]
+
+col_keep <- setdiff(colnames(data_pca), col_exclude)
+
+identical(col_keep, col_keep2)
+
+
+# PCA  analysis-----------------
+tidy_pca_nest <- data_pca %>% 
+  select(sample_marmoset, all_of(col_keep)) %>% 
+  nest(data = everything()) %>% 
+  mutate(
+    pca = map(data, 
+              ~prcomp(.x %>% select(-sample_marmoset), center = TRUE, scale = TRUE)),
+    pca_aug = map2(pca, data, ~augment(.x, data = .y))
+  )
+
+tidy_pca_nest$pca %>% 
+  map(~tidy(.x, data = .y, "pcs")) %>% 
+  as.data.frame() %>% 
+  ggplot(aes(factor(PC), percent, group = 1)) +
+  #geom_bar(stat = "identity") +
+  geom_point() +
+  geom_line(color = 'red') +
+  labs(
+    x = "Principle Components",
+    y = "Variance Explained",
+    title = "Scree plot: PCA"
+  ) + 
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        axis.title = element_text(face = 'bold'))
+
+library(ggsci)
+p_pca <- 
+  tidy_pca_nest %>% 
+  unnest(pca_aug) %>% 
+  separate(sample_marmoset, 
+           into = c("age", "sex", "drug", "animal_id"), sep = "_") %>% 
+  unite(group, age:drug, sep= "_") %>% 
+  
+  ggplot(aes(.fittedPC1, .fittedPC2)) +
+  geom_point( aes(color = group, shape = group),size = 4, alpha = 0.9) + 
+  labs(
+    x = "PC1",
+    y = "PC2",
+    title = "PC score"
+  ) + 
+  scale_y_continuous(expand = expansion(mult = c(.1, .2)))+
+  scale_fill_aaas() +
+  scale_color_aaas() + 
+  theme_prism(border = TRUE) +
+  theme(legend.position = "bottom")
+
+p_pca
+
+graph2ppt(p_pca, file = "marmoset_proteomics_PCA.pptx")
+
+
+
+```
+
+
+```{r chunk10, include=FALSE, eval=FALSE}
+# testing -----------------
+data_long <- data_long %>% 
+  filter(uniprot_id %in% filt_protein) 
+
+data_text <- data_long %>% 
+  filter(treatment == "ctrl") %>% 
+  group_by(uniprot_id, pvalue, protein_names, gene_names) %>%
+  summarise(
+    n =n(),
+    y= quantile(exclusive_intensity, 0.75)*2
+  ) %>% 
+  ungroup() %>% 
+  mutate( treatment = "ctrl")
+  
+
+
+p2 <- filter(data_long, uniprot_id %in% filt_protein[1:18]) %>% 
+plotly_box()
+
+
+htmlwidgets::saveWidget(p2, "index.html")
+
+```
+
+
+
+
+```{r chunk11, include=FALSE, eval=FALSE}
+
+# How to avoid warning when introducing NAs by coercion https://stackoverflow.com/questions/14984989/how-to-avoid-warning-when-introducing-nas-by-coercion
+as.num = function(x, na.strings = "NA") {
+    stopifnot(is.character(x))
+    na = x %in% na.strings
+    x[na] = 0
+    x = as.numeric(x)
+    x[na] = NA_real_
+    x
+}
+
+
+
+set.seed(1)
+vot <- rnorm(100,15,5)
+vot <- sort(vot, decreasing=FALSE)
+phon <- "t"
+stress <- c(rep("stressed",50),rep("unstressed",50))
+
+df1 <- data.frame(phon,stress,vot)
+
+vot <- rnorm(100,-60,15)
+vot <- sort(vot, decreasing=FALSE)
+phon <- "d"
+df2 <- data.frame(phon,stress,vot)
+
+df3 <- rbind(df1, df2)
+summary(df)
+
+
+bwplot(vot ~ phon | stress, data= df3)
+
+```
