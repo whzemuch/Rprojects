@@ -89,83 +89,10 @@ write_csv(df_clean, file = "df_clean.csv")
 ```
 
 
-```{r chunk4,  eval=FALSE, include=FALSE}
-# AnnotationHub
-
-data(geneList, package = "DOSE")
-
-d <- bitr(names(gene_list), 
-      fromType = "UNIPROT",
-      toType = "ENTREZID", 
-      OrgDb = "org.Hs.eg.db"
-      )
-
-
-library(AnnotationHub)
-
-hub <- AnnotationHub()
-hub
-
-unique(hub$dataprovider)
-unique(hub$species) %>% grep("jacchus", ., value = TRUE)
-unique(hub$rdataclass)
-
- dm <- query(hub, c("OrgDb", "jacchus"))
-
-marmoset_orgb <- dm[["AH80634"]]
-
-columns(marmoset_orgb)
-length(keys(marmoset_orgb))
-keytypes(marmoset_orgb)
-
-gene_list <- data_wide %>% pull(gene_names)  #4978
-
-
-entrizid_list <- bitr(gene_list, 'SYMBOL', "ENTREZID", marmoset_orgb) 
-  
-colnames(entrizid_list)[1] <- "gene_names"
-
-
-
-df_id <- data_wide %>% 
-  dplyr::select(uniprot_id, gene_names) %>% 
-  inner_join(entrizid_list, by = "gene_names" ) 
-
-sample_gene <- df_id$ENTREZID[1:100]
-
-
-enrich.go = enrichGO(
-     gene = sample_gene,
-     OrgDb = marmoset_orgb,
-     
-     
-    
-    pvalueCutoff = 1,
-    qvalueCutoff = 1,
-    readable     = T)
-     
-)
-
-barplot(enrich.go, showCategory = 20)
-
- enrich.go@result %>%  View
-   fiter()
-   mutate(GeneRatio = eval(parse(text = GeneRatio)))%>% 
-   ggplot(aes(x = GeneRatio, y = fct_reorder(Description, GeneRatio))) + 
-        geom_point(aes(color = p.adjust)) +
-        theme_bw(base_size = 14) +
-        scale_colour_gradient(limits=c(0, 0.10), low="red") +
-        ylab(NULL) 
-
-
-write_csv(gene_list, file = "gene_list.csv")
-len
-
-```
 
 
 ### Data clean
-```{r chunk5}
+```{r chunk4}
 
 df_clean <- fread("./df_clean.csv", data.table = FALSE) %>% as_tibble()
 filt_protein <- df_clean$protein_name
@@ -237,7 +164,7 @@ bwplot(log2_intensity ~ animal_id , data = data_long2,
 
 
 ### Plotting...plotly
-```{r chunk6_plotly}
+```{r chunk5_plotly}
 
 # functions---------------------
 
@@ -327,7 +254,7 @@ Robjects_description
 
 ```
 ### Plots for ASAH1, PCK1...
-```{r chunk7, warning=FALSE, message=FALSE, error=FALSE }
+```{r chunk6, warning=FALSE, message=FALSE, error=FALSE }
 
 id_4_plotting <- c("F7H4U3","A0A2R8M3L6", "F7ISX5", "F7I3Y0","A0A5F4WAL2", "A0A2R8MHZ1")
 
@@ -420,7 +347,7 @@ walk2(data_plot_split, seq_along(data_plot_split), ~write_csv(.x, file = paste0(
 ```
 
 
-```{r chunk8, warning=FALSE, message=FALSE, error=FALSE }
+```{r chunk7, warning=FALSE, message=FALSE, error=FALSE }
 
 dnest <- data_long %>% group_by(uniprot_id, treatment) %>% nest()
 
@@ -433,7 +360,7 @@ dnest$data[[1]]
 
 
 ### PCA analysis
-```{r chunk9-PCA, warning=FALSE, message=FALSE, error=FALSE }
+```{r chunk8-PCA, warning=FALSE, message=FALSE, error=FALSE }
 
 data_pca <- data_all_wide %>% 
   select(uniprot_id, starts_with(c("young", "old"))) %>% 
@@ -539,7 +466,7 @@ graph2ppt(p_pca, file = "marmoset_proteomics_PCA.pptx")
 ```
 
 
-```{r chunk10, include=FALSE, eval=FALSE}
+```{r chunk9, include=FALSE, eval=FALSE}
 # testing -----------------
 data_long <- data_long %>% 
   filter(uniprot_id %in% filt_protein) 
@@ -566,38 +493,3 @@ htmlwidgets::saveWidget(p2, "index.html")
 
 
 
-
-```{r chunk11, include=FALSE, eval=FALSE}
-
-# How to avoid warning when introducing NAs by coercion https://stackoverflow.com/questions/14984989/how-to-avoid-warning-when-introducing-nas-by-coercion
-as.num = function(x, na.strings = "NA") {
-    stopifnot(is.character(x))
-    na = x %in% na.strings
-    x[na] = 0
-    x = as.numeric(x)
-    x[na] = NA_real_
-    x
-}
-
-
-
-set.seed(1)
-vot <- rnorm(100,15,5)
-vot <- sort(vot, decreasing=FALSE)
-phon <- "t"
-stress <- c(rep("stressed",50),rep("unstressed",50))
-
-df1 <- data.frame(phon,stress,vot)
-
-vot <- rnorm(100,-60,15)
-vot <- sort(vot, decreasing=FALSE)
-phon <- "d"
-df2 <- data.frame(phon,stress,vot)
-
-df3 <- rbind(df1, df2)
-summary(df)
-
-
-bwplot(vot ~ phon | stress, data= df3)
-
-```

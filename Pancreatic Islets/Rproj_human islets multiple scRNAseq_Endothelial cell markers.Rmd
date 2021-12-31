@@ -1,0 +1,382 @@
+---
+title: "Endothelial cell makers in human pancreatic islets"
+author: "whzemuch"
+date: "4/14/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Purpose
+
+To validate whether the endothelia surface cell markers (provided by R&D) exist in human pancreatic islets.
+
+For the purposes, we’ve chosen human pancreatic islet cell datasets produced across four technologies, CelSeq (GSE81076) CelSeq2 (GSE85241), Fluidigm C1 (GSE86469), and SMART-Seq2 (E-MTAB-5061). 
+
+- Assembly of multiple distinct scRNAseq datasets into an integrated reference. 
+- Transfer of cell type labels from a reference dataset onto a new query dataset
+
+
+- Endothelial Progenitor and Endothelial Cell Markers by R&D (https://www.rndsystems.com/research-area/endothelial-progenitor-and-endothelial-cell-markers)
+ 
+
+
+
+
+
+Dataset preprocessing： load in the datasets. 
+
+```{r 0, message=FALSE, warning=FALSE, cache=TRUE}
+library(Seurat)
+library(SeuratData)
+library(tidyverse)
+
+```
+
+To construct a reference, we will identify ‘anchors’ between the individual datasets. First, we split the combined object into a list, with each dataset as an element.
+
+```{r 1, warning=FALSE, message=FALSE, error=FALSE, cache=TRUE}
+file = "humanPancreaticIsletDataList.Rda"
+if (!file.exists(file)) {
+  InstallData("panc8")
+  data("panc8")
+  save(panc8, file="humanPancreaticIsletDataList.Rda")
+}
+
+load(file)
+pancreas.list <-  SplitObject(panc8, split.by = "tech")
+pancreas.list <-  pancreas.list[c("celseq", "celseq2", "smartseq2")]
+
+```
+
+Prior to finding anchors, we perform standard preprocessing (log-normalization), and identify variable features individually for each. Note that Seurat v3 implements an improved method for variable feature selection based on a variance stabilizing transformation ("vst")
+
+```{r 2, warning=FALSE, message=FALSE, error=FALSE}
+
+for (i in 1: length(pancreas.list)){
+  pancreas.list[[i]] <- NormalizeData(pancreas.list[[i]], verbose = FALSE)
+  pancreas.list[[i]] <- FindVariableFeatures(pancreas.list[[i]], 
+                                             selection.method = "vst",
+                                             nfeatures =2000, verbose = FALSE)
+}
+
+# Get alpha, beta, and endothelial cell count in each  platform 
+
+# Method 1----
+count_table <- sapply(pancreas.list, function(x){
+  # total cell numbers
+  n_row = setNames(dim(x)[2], "total_count")
+  # cell_list = c("alpha", "beta", "endothelial")
+  cell_list <- x[[]]$celltype %>% unique()
+  
+  temp_count <- sapply(cell_list, function (cell){
+    # count each cell type from cell_list
+     x[[]] %>% 
+        filter(celltype == cell) %>%
+          summarise(count=n())
+    })
+  count = do.call(c, list(n_row, temp_count)) # combine total cell count with cell specific count 
+ 
+  return (count)
+  
+})
+
+count_table <- as.data.frame(count_table)
+count_table
+
+# Method 2 ----
+
+count_tab <- lapply(pancreas.list, function(x){
+  
+  x[[]]%>% 
+  group_by(celltype) %>% 
+  summarize(count=n()) 
+  #column_to_rownames(var="celltype")
+})
+count_tab
+bind_cols(count_tab)  
+count_tab_comb <- count_tab %>% 
+  reduce(left_join, by="celltype") %>% 
+  column_to_rownames(var="celltype")
+count_tab_comb
+
+colnames(count_tab_comb)<- paste(names(pancreas.list), "count", sep = ".")
+count_tab_comb1 <- rbind(count_tab_comb, apply(count_tab_comb, 2, sum)) # add colsum
+rownames(count_tab_comb1)[14] <- "total cells"
+
+count_tab_percent <- do.call(rbind, apply(count_tab_comb1, 1, function(x) x/count_tab_comb1[14,]))
+
+
+
+```
+Integration of 3 pancreatic islet cell datasets
+
+Next, we identify anchors using the FindIntegrationAnchors function, which takes a list of Seurat objects as input. Here, we integrate three of the objects into a reference (we will use the fourth later in this vignette)
+
+We use all default parameters here for identifying anchors, including the ‘dimensionality’ of the dataset (30; feel free to try varying this parameter over a broad range, for example between 10 and 50).
+
+
+```{r 3, warning=FALSE, message=FALSE, error=FALSE}
+
+reference.list <- pancreas.list[c("celseq", "celseq2", "smartseq2")]
+pancreas.anchors <- FindIntegrationAnchors(object.list = reference.list,                                             dims = 1:30)
+
+```
+
+We then pass these anchors to the IntegrateData function, which returns a Seurat object.
+
+The returned object will contain a new Assay, which holds an integrated (or ‘batch-corrected’) expression matrix for all cells, enabling them to be jointly analyzed.
+
+
+```{r 4, warning=FALSE, message=FALSE, error=FALSE}
+pancreas.integrated <-  IntegrateData(anchorset = pancreas.anchors, 
+                                      dims = 1:30)
+
+
+```
+
+After running IntegrateData, the Seurat object will contain a new Assay with the integrated expression matrix. Note that the original (uncorrected values) are still stored in the object in the “RNA” assay, so you can switch back and forth.
+
+We can then use this new integrated matrix for downstream analysis and visualization. Here we scale the integrated data, run PCA, and visualize the results with UMAP. The integrated datasets cluster by cell type, instead of by technology.
+
+
+```{r 5, fig.width=12, warning=FALSE, message=FALSE, error=FALSE, cache=TRUE}
+library(cowplot)
+library(patchwork)
+# switch to integreated assay. The variable features of this assay are automatically
+# set during Integration
+
+DefaultAssay(pancreas.integrated) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+
+pancreas.integrated <- ScaleData(pancreas.integrated, verbose = FALSE)
+pancreas.integrated <- RunPCA(pancreas.integrated, npcs = 30, verbose = FALSE)
+pancreas.integrated <- RunUMAP(pancreas.integrated, reduction = "pca", dims = 1:30)
+
+p1 <-  DimPlot(pancreas.integrated, 
+               reduction = "umap", 
+               group.by = "tech")
+
+p2 <-  DimPlot(pancreas.integrated, 
+               reduction = "umap", 
+               group.by = "celltype", 
+               label = TRUE, 
+               repel = TRUE) + NoLegend()
+
+p1 + p2
+
+
+```
+
+Cell type classification using an integrated reference
+
+Seurat v3 also supports the projection of reference data (or meta data) onto a query object. While many of the methods are conserved (both procedures begin by identifying anchors), there are two important distinctions between data transfer and integration:
+
+In data transfer, Seurat does not correct or modify the query expression data.
+
+In data transfer, Seurat has an option (set by default) to project the PCA structure of a reference onto the query, instead of learning a joint structure with CCA. We generally suggest using this option when projecting data between scRNA-seq datasets.
+After finding anchors, we use the TransferData function to classify the query cells based on reference data (a vector of reference cell type labels). TransferData returns a matrix with predicted IDs and prediction scores, which we can add to the query metadata.
+
+```{r 6, warning=FALSE, message=FALSE, error=FALSE}
+
+pancreas.query <- pancreas.list[["smartseq2"]]
+pancreas.anchors <- FindTransferAnchors(reference = pancreas.integrated, query = pancreas.query, dims = 1:30)
+prediction <- TransferData(anchorset = pancreas.anchors, refdata = pancreas.integrated$celltype, dims = 1:30)
+
+pancreas.query <- AddMetaData(pancreas.query, metadata = prediction)
+
+```
+Because we have the original label annotations from our full integrated analysis, we can evaluate how well our predicted cell type annotations match the full reference. In this example, we find that there is a high agreement in cell type classification, with over 97% of cells being labeled correctly.
+
+
+```{r 7, warning=FALSE, message=FALSE, error=FALSE}
+pancreas.query$prediction.match <- pancreas.query$predicted.id == pancreas.query$celltype
+table(pancreas.query$prediction.match)
+
+
+```
+To verify this further, we can examine some canonical cell type markers for specific pancreatic islet cell populations. Note that even though some of these cell types are only represented by one or two cells (e.g. epsilon cells), we are still able to classify them correctly.
+
+```{r 8, warning=FALSE, message=FALSE, error=FALSE}
+table(pancreas.query$predicted.id) 
+
+```
+
+```{r 9, warning=FALSE, message=FALSE, error=FALSE}
+# Check gene expression using VlinPlot function
+
+p.CYR61_CD90 <- VlnPlot(pancreas.query, c("CYR61", "THY1", "THBS1", "PECAM1", "INS"), group.by = "predicted.id")
+p.CYR61_CD90
+
+file_CYR61 <- "CYR61_CD90_expression in human islets.pdf"
+if (!file.exists(file_CYR61)) {
+  ggsave(file_CYR61, width = 21, height = 15, units = "cm")
+}
+
+# save the VlnPlot of different platform
+lapply(seq_along(pancreas.list), function(x){
+  VlnPlot(pancreas.list[[x]], c("CYR61", "THY1", "THBS1", "PECAM1", "INS", "NES"), group.by = "celltype")
+  ggsave(paste0(names(pancreas.list)[x],"_geneExpression.pdf"), width = 21, height = 18, units = "cm")
+})
+
+
+# plot multiple gene expression profiles in one page
+gene_list <-  c("INS", "GCG",  "NES","THBS1", "PECAM1", "KDR",  "FLT1","VEGFA", "MCAM", "ACE", "BSG", "CD36")
+
+ plot_geneExp_islets <- function(gene_list, filename="666.pdf"){
+   # plot the expression level of genes from gene_list
+    VlnPlot(pancreas.list[[2]], gene_list, group.by = "celltype")
+    ggsave(filename, width = 30, height = 30, units = "cm") 
+}
+
+ save_as_pdf <- TRUE 
+ 
+ 
+if (save_as_pdf) {
+  #  first batch of genes @endothelial cells
+  gene_list <- c( "INS",  "PECAM1", "ENG","ECSCR",
+                "KDR", "FLT1", "FLT4", "CDH5",
+                "ESAM", "EMCN", "VWF", "CD93" 
+                )
+  plot_geneExp_islets(gene_list, "111.pdf") 
+  
+} 
+
+
+ if (save_as_pdf) {
+    #  sechond batch of genes @endothelial cells
+  gene_list <- c( "GCG", "PECAM1", "THBS1" , "NES",
+                  "KDR", "CDH5", "PODXL", "S1PR1",
+                  "VEGFA", "MCAM", "ACE", "BSG"
+                  )
+  plot_geneExp_islets(gene_list, "222.pdf") 
+  
+} 
+
+
+ if (save_as_pdf) {
+   # not working markers:batch1
+  gene_list <- c( "INS", "ACKR2", "CD34" , "CD36",
+                  "CD151", "CD160", "CD300LG", "COLEC11",
+                  "COLEC12", "F3", "CLEC4M", "DCBLD2",
+                  "CD248", "PROCR", "EPOR", "ICAM1"
+                  )
+  plot_geneExp_islets(gene_list, "333.pdf") 
+  
+ }
+ 
+  if (save_as_pdf) {
+   # not working markers:batch2
+  gene_list <- c( "INS", "FABP5", "FABP6", "ICAM2",
+                  "IL1R1", "IL13RA2", "ITGA4", "ITGB1",
+                  "ITGB2", "ITGB7", "KLF4", "LYVE1", 
+                  "NECTIN2", "TYMP", "PDPN", "SLAMF1"
+                  )
+  plot_geneExp_islets(gene_list, "444.pdf") 
+  
+}
+ 
+
+ if (save_as_pdf) {
+   # not working markers:batch3
+  gene_list <- c( "S1PR2", "S1PR3", "S1PR4", 
+                  "S1PR5", "SELE", "STAB1", "STAB2",
+                  "PLXDC1", "SELP", "THBD", "THSD1"
+                 
+                  )
+  plot_geneExp_islets(gene_list, "555.pdf") 
+  
+ }  
+ 
+ if (save_as_pdf) {
+   # not working markers:batch4
+  gene_list <- c(  "THSD7A", "TEK", "TNFRSF1A", "TNFRSF1B",
+                  "TNFRSF10A",  "TNFRSF10B","EGFL7","AGGF1", 
+                  "PDGFB", "", "", ""
+                  )
+  plot_geneExp_islets(gene_list, "666.pdf") 
+  
+ }  
+ 
+ 
+ 
+ 
+```
+
+## Explorer the Seurat object
+```{r 10, warning=FALSE, message=FALSE, error=FALSE, include=FALSE}
+# get total gene
+
+rownames(pancreas.list[[1]]) %>% head() # gene name or feature names
+colnames(pancreas.list[[1]]) %>% head #  cell names
+
+total.genes <- list()
+total.genes <- lapply(pancreas.list, function(x) rownames(x))
+head(total.genes[[1]], 5)
+
+# get commmon gene names
+
+common.genes <-  Reduce(f = intersect, x= total.genes)
+# Query gene in common.genes
+common.genes[grepl("INS", common.genes)]
+common.genes[grepl("PECAM1", common.genes)]
+common.genes[grepl("CYR61", common.genes)]
+
+
+#Accessing data from an Seurat object is done with the GetAssayData function. Adding expression data to either the counts, data, or scale.data slots can be done with SetAssayDat
+
+GetAssayData(object = pancreas.integrated, slot = 'scale.data')[1:5, 1:5]
+GetAssayData(object = pancreas.integrated, slot = 'scale.data')[1:5, 1:5]
+GetAssayData(object = pancreas.list[[1]], slot = 'counts')[1:5, 1:5]
+
+# Cell-level meta data can be accessed with the single [ extract operator or using the $ sigil.
+
+# Cell-level meta data is stored as a data frame
+# Standard data frame functions work on the meta data data frame
+
+colnames(x = pancreas.integrated[[]]) %>%  head
+# [1] "orig.ident"       "nCount_RNA"       "nFeature_RNA"     "tech"            
+# [5] "replicate"        "assigned_cluster" "celltype"         "dataset"  
+
+head(x = pancreas.integrated[[c("orig.ident", "nCount_RNA", "tech")]])
+
+pancreas.integrated[[c("orig.ident", "nCount_RNA", "tech", "nFeature_RNA")]] %>% 
+  filter(tech == "celseq2") %>% 
+  head
+
+# Passing `drop = TRUE` will turn the meta data into a names vector
+# with each entry being named for the cell it corresponds to
+ head(x = pancreas.integrated[['tech', drop = TRUE]])
+# AAACATACAACCAC AAACATTGAGCTAC AAACATTGATCAGC AAACCGTGCTTCCG AAACCGTGTATGCG
+#          "0"            "2"            "0"            "1"            "5"
+# AAACGCACTGGTAC
+#           "0"
+
+# Get  dimension of each seurat object
+lapply(pancreas.list, function(x) dim(x[[]]))
+
+# count cell types in each seurat object
+lapply(pancreas.list, function(x) table(x[['celltype']]))
+
+# mimic table function for celltype
+pancreas.list[[1]][[]] %>% group_by(celltype, tech) %>% summarise( n=n())
+
+dfList <- lapply(pancreas.list, function(x) {x[[]] %>% group_by(celltype, tech) %>% summarise(n=n())})
+
+df <- do.call(rbind, dfList)
+
+p.celltype_summary <- ggplot(data=df) +
+  geom_point(aes(x=tech, y=n, size =n, color= tech)) +
+  facet_wrap(vars(celltype), ncol= 3) +
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+p.celltype_summary 
+
+
+```
+
+
